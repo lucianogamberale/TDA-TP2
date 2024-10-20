@@ -1,53 +1,64 @@
 import sys
 
-ARCHIVO_PARTES = sys.argv[1]
+ARCHIVO_RUTAS = sys.argv[1]
+
+NO_VISITADO = -1
+
+ARISTA_NO_VISITADA = ""
+ARISTA_ORIGEN = "origin"
+ARISTA_FORWARD = "forward"
+ARISTA_BACKWARD = "backward"
 
 
 def main():
 
-    # leerArchivoTareas(ARCHIVO_TAREAS)
-    # leerArchivoGanancias(ARCHIVO_GANANCIAS)
-
-    rutas = [
-        ("A", "B"),
-        ("A", "D"),
-        ("A", "E"),
-        ("B", "C"),
-        ("C", "D"),
-        ("C", "E"),
-        ("D", "E"),
-    ]
+    rutas = leerArchivoRutas(ARCHIVO_RUTAS)
 
     nodos = extraerNodos(rutas)
 
     idPorNodos = {nodo: i + 1 for i, nodo in enumerate(nodos)}
-
-    idNodoOrigen = 0
-    idNodoDestino = len(nodos) + 1
-    idPorNodos["origen"] = idNodoOrigen
-    idPorNodos["destino"] = idNodoDestino
+    idOrigen = 0
+    idDestino = len(nodos) + 1
+    idPorNodos["origen"] = idOrigen
+    idPorNodos["destino"] = idDestino
+    idNodos = idPorNodos.values()
 
     aristas = generarAristasBidireccionales(rutas, idPorNodos)
-    aristas.append((idPorNodos["origen"], idPorNodos["B"], len(nodos)))
 
-    aristas.append((idPorNodos["A"], idPorNodos["destino"], len(nodos)))
-    max_flow = fordFulkerson(idPorNodos.values(), aristas, idNodoOrigen, idNodoDestino)
-    # considerar si esto da cero es porque no encontró camino
-    print("El flujo máximo es:", max_flow)
+    flujosMaximos = []
+
+    for nodo, id in idPorNodos.items():
+        if id == idOrigen or id == idDestino:
+            continue
+        if id == 1:
+            aristas.append((idOrigen, id, len(nodos)))
+            continue
+
+        aristas.append((idPorNodos[nodo], idDestino, len(nodos)))
+        flujoMaximo = fordFulkerson(idNodos, aristas, idOrigen, idDestino)
+        aristas.pop()
+
+        flujosMaximos.append(flujoMaximo)
+
+    flujoMaximo = min(flujosMaximos)
+    print("Minimo numero de rutas que al cortarlas provoque desconexion:", flujoMaximo)
 
 
 # ======================= LECTURA ARCHIVOS =======================
 
 
-def leerArchivoPartes(nombreArchivo):
-    lista_partes = []
+def leerArchivoRutas(nombreArchivo):
+    rutas = []
 
-    # with open(nombreArchivo, 'r') as archivo:
-    #     for linea in archivo:
-    #         (x1, y, x2) = map(int, linea.strip().split(','))
-    #         lista_partes.append((x1, y, x2))
+    with open(nombreArchivo, "r") as archivo:
+        for linea in archivo:
+            # Elimina espacios en blanco y saltos de línea
+            linea = linea.strip()
+            # Divide la línea por la coma y crea una tupla
+            origen, destino = linea.split(",")
+            rutas.append((origen, destino))
 
-    return lista_partes
+    return rutas
 
 
 # ======================= REDUCCION =======================
@@ -73,99 +84,176 @@ def generarAristasBidireccionales(rutas, mapeoNodoConId):
     return aristas
 
 
-# ======================= FORD - FULKERSON =======================
+# ======================= FORD - FULKERSON PUBLICO =======================
 
 
-def fordFulkerson(nodes, edges, source, sink):
-    n = len(nodes)
+def fordFulkerson(nodos, aristas, origen, destino):
 
-    # Inicializamos el flujo como una matriz n x n de ceros
-    flow = [[0] * n for _ in range(n)]
+    flujoMaximo = 0
+    cantidadNodos = len(nodos)
+    flujo = [[0] * cantidadNodos for _ in range(cantidadNodos)]
 
-    # Creamos el grafo residual basado en las aristas originales
-    residual_graph = createResidualGraph(n, edges, flow)
+    # Creamos dos matrices para el grafo residual:
+    # - una para las aristas hacia adelante
+    # - otra para las aristas hacia atrás
+    residualForward, residualBackward = crearGrafoResidual(cantidadNodos, aristas)
 
-    # Inicializamos el flujo máximo
-    max_flow = 0
+    # Buscar un camino de aumento P en el grafo residual utilizando DFS
+    caminoDFS = DFS(residualForward, residualBackward, origen, destino, cantidadNodos)
 
     # Mientras haya un camino s-t en el grafo residual
-    while True:
-        # Buscar un camino de aumento P en el grafo residual
-        parent = DFS(residual_graph, source, sink, n)
+    while caminoDFS[destino][0] != NO_VISITADO:
 
-        # Si no hay más caminos, salimos del bucle
-        if parent[sink] == -1:
-            break
+        # Busco cuello de botella en el camino de aumento
+        cuelloBotella = calcularCuelloBotella(
+            caminoDFS, residualForward, residualBackward, origen, destino
+        )
 
-        # Encontrar el flujo máximo que puede pasar por el camino
-        # (cuello de botella)
-        path_flow = float("Inf")
-        v = sink
-        while v != source:
-            u = parent[v]
-            path_flow = min(path_flow, residual_graph[u][v])
-            v = u
+        # Actualizo flujo y grafos residuales con camino de aumento
+        actualizarFlujo(
+            flujo,
+            residualForward,
+            residualBackward,
+            caminoDFS,
+            cuelloBotella,
+            origen,
+            destino,
+        )
 
-        # Actualizamos el flujo en el camino P
-        updateFlow(flow, residual_graph, parent, path_flow, source, sink)
+        flujoMaximo += cuelloBotella
 
-        # Sumar el flujo encontrado al flujo máximo
-        max_flow += path_flow
+        # Busco camino de aumento P en el grafo residual utilizando DFS
+        caminoDFS = DFS(
+            residualForward, residualBackward, origen, destino, cantidadNodos
+        )
 
-    return max_flow
-
-
-def createResidualGraph(n, edges, flow):
-    # Inicializamos el grafo residual como una matriz n x n de ceros
-    residual_graph = [[0] * n for _ in range(n)]
-
-    # Por cada arista original (u, v, capacidad), creamos las
-    # aristas del grafo residual
-    for u, v, capacity in edges:
-        residual_graph[u][v] = capacity  # Capacidad hacia adelante
-
-    return residual_graph
+    return flujoMaximo
 
 
-def updateFlow(flow, residual_graph, parent, path_flow, source, sink):
-    # Recorremos el camino de aumento y actualizamos
-    # el flujo y el grafo residual
-    v = sink
-    while v != source:
-        u = parent[v]
-        # Aumentamos el flujo en la arista hacia adelante
-        flow[u][v] += path_flow
-        # Disminuimos el flujo en la arista hacia atrás (reencauzamos flujo)
-        flow[v][u] -= path_flow
+# ======================= FORD - FULKERSON PRIVADO =======================
 
-        # Actualizamos el grafo residual
 
-        # Reducimos la capacidad hacia adelante
-        residual_graph[u][v] -= path_flow
-        # Aumentamos la capacidad hacia atrás
-        residual_graph[v][u] += path_flow
+def crearGrafoResidual(cantidadNodos, aristas):
+    # Inicializamos dos grafos residuales: uno para las aristas hacia adelante
+    # y otro para las aristas hacia atrás
+    residualForward = [[0] * cantidadNodos for _ in range(cantidadNodos)]
+    residualBackward = [[0] * cantidadNodos for _ in range(cantidadNodos)]
+
+    for u, v, capacidad in aristas:
+        # Capacidad hacia adelante
+        residualForward[u][v] = capacidad
+        # Capacidad hacia atrás inicialmente es 0
+        residualBackward[v][u] = 0
+
+    return residualForward, residualBackward
+
+
+def calcularCuelloBotella(
+    caminoDFS, residualForward, residualBackward, origen, destino
+):
+    cuelloBotella = float("Inf")
+    v = destino
+    while v != origen:
+        u = caminoDFS[v][0]
+        if caminoDFS[v][1] == ARISTA_FORWARD:
+            cuelloBotella = min(cuelloBotella, residualForward[u][v])
+        elif caminoDFS[v][1] == ARISTA_BACKWARD:
+            cuelloBotella = min(cuelloBotella, residualBackward[u][v])
+        v = u
+
+    return cuelloBotella
+
+
+def actualizarFlujo(
+    flujo, residualForward, residualBackward, caminoDFS, path_flow, origen, destino
+):
+    v = destino
+    while v != origen:
+        u = caminoDFS[v][0]
+
+        if caminoDFS[v][1] == ARISTA_FORWARD:
+            flujo[u][v] += path_flow
+            residualForward[u][v] -= path_flow
+            residualBackward[v][u] += path_flow
+        elif caminoDFS[v][1] == ARISTA_BACKWARD:
+            flujo[v][u] -= path_flow
+            residualForward[v][u] += path_flow
+            residualBackward[u][v] -= path_flow
 
         v = u
 
 
-def DFS(graph, source, sink, n):
-    # DFS para encontrar un camino s-t en el grafo residual
-    stack = [source]
-    visited = [-1] * n  # Lista que guarda el padre de cada nodo en el camino
-    visited[source] = source
+# ======================= DFS =======================
 
-    while stack:
-        u = stack.pop()
 
-        for v in range(n):
-            # Si no ha sido visitado y tiene capacidad
-            if visited[v] == -1 and graph[u][v] > 0:
-                visited[v] = u
-                if v == sink:
-                    return visited
-                stack.append(v)
+def DFS(residualForward, residualBackward, origen, destino, cantidadNodos):
 
-    return visited
+    nodosVisitados = [(NO_VISITADO, ARISTA_NO_VISITADA)] * cantidadNodos
+    nodosVisitados[origen] = (origen, ARISTA_ORIGEN)
+
+    return DFSRecursivo(
+        residualForward,
+        residualBackward,
+        origen,
+        destino,
+        cantidadNodos,
+        nodosVisitados,
+    )
+
+
+def DFSRecursivo(
+    residualForward,
+    residualBackward,
+    nodoActual,
+    destino,
+    cantidadNodos,
+    nodosVisitados,
+):
+
+    # si llegué al sink, retorno el camino
+    if nodoActual == destino:
+        return nodosVisitados
+
+    for i in range(cantidadNodos):
+        # si el nodo no fue visitado y hay camino hacia adelante
+        if nodosVisitados[i][0] == NO_VISITADO and residualForward[nodoActual][i] > 0:
+            nodosVisitados[i] = (nodoActual, ARISTA_FORWARD)
+
+            # busco un camino desde el nodo i en adelante
+            result = DFSRecursivo(
+                residualForward,
+                residualBackward,
+                i,
+                destino,
+                cantidadNodos,
+                nodosVisitados,
+            )
+            # si llegué al destino, tengo un camino y lo retorno
+            if result[destino][0] != NO_VISITADO:
+                return nodosVisitados
+
+            nodosVisitados[i] = (NO_VISITADO, ARISTA_NO_VISITADA)
+
+        # si el nodo no fue visitado y hay camino hacia atras
+        if nodosVisitados[i][0] == NO_VISITADO and residualBackward[nodoActual][i] > 0:
+            nodosVisitados[i] = (nodoActual, ARISTA_BACKWARD)
+
+            # busco un camino desde el nodo i en adelante
+            result = DFSRecursivo(
+                residualForward,
+                residualBackward,
+                i,
+                destino,
+                cantidadNodos,
+                nodosVisitados,
+            )
+            # si llegué al destino, tengo un camino y lo retorno
+            if result[destino][0] != NO_VISITADO:
+                return nodosVisitados
+
+            nodosVisitados[i] = (NO_VISITADO, ARISTA_NO_VISITADA)
+
+    return nodosVisitados
 
 
 if __name__ == "__main__":
