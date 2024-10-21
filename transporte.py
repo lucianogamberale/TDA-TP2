@@ -14,34 +14,10 @@ def main():
 
     rutas = leerArchivoRutas(ARCHIVO_RUTAS)
 
-    nodos = extraerNodos(rutas)
-
-    idPorNodos = {nodo: i + 1 for i, nodo in enumerate(nodos)}
-    idOrigen = 0
-    idDestino = len(nodos) + 1
-    idPorNodos["origen"] = idOrigen
-    idPorNodos["destino"] = idDestino
-    idNodos = idPorNodos.values()
-
-    aristas = generarAristasBidireccionales(rutas, idPorNodos)
-
-    flujosMaximos = []
-
-    for nodo, id in idPorNodos.items():
-        if id == idOrigen or id == idDestino:
-            continue
-        if id == 1:
-            aristas.append((idOrigen, id, len(nodos)))
-            continue
-
-        aristas.append((idPorNodos[nodo], idDestino, len(nodos)))
-        flujoMaximo = fordFulkerson(idNodos, aristas, idOrigen, idDestino)
-        aristas.pop()
-
-        flujosMaximos.append(flujoMaximo)
-
-    flujoMaximo = min(flujosMaximos)
-    print("Minimo numero de rutas que al cortarlas provoque desconexion:", flujoMaximo)
+    minNumeroRutas = minimoNumeroRutasQueGeneranDesconexion(rutas)
+    print(
+        "Minimo numero de rutas que al cortarlas provoque desconexion:", minNumeroRutas
+    )
 
 
 # ======================= LECTURA ARCHIVOS =======================
@@ -59,6 +35,40 @@ def leerArchivoRutas(nombreArchivo):
             rutas.append((origen, destino))
 
     return rutas
+
+
+# ======================= FUNCIÓN PRINCIPAL =======================
+
+
+def minimoNumeroRutasQueGeneranDesconexion(rutas):
+
+    nodos = extraerNodos(rutas)
+
+    mapeoNodoConId = {nodo: i + 1 for i, nodo in enumerate(nodos)}
+    idOrigen = 0
+    idDestino = len(nodos) + 1
+    mapeoNodoConId["origen"] = idOrigen
+    mapeoNodoConId["destino"] = idDestino
+    idNodos = mapeoNodoConId.values()
+
+    aristas = generarAristasBidireccionales(rutas, mapeoNodoConId)
+
+    flujosMaximos = []
+
+    for nodo, id in mapeoNodoConId.items():
+        if id == idOrigen or id == idDestino:
+            continue
+        if id == 1:
+            aristas.append((idOrigen, id, len(nodos)))
+            continue
+
+        aristas.append((mapeoNodoConId[nodo], idDestino, len(nodos)))
+        flujoMaximo = fordFulkerson(idNodos, aristas, idOrigen, idDestino)
+        aristas.pop()
+
+        flujosMaximos.append(flujoMaximo)
+
+    return min(flujosMaximos)
 
 
 # ======================= REDUCCION =======================
@@ -165,20 +175,20 @@ def calcularCuelloBotella(
 
 
 def actualizarFlujo(
-    flujo, residualForward, residualBackward, caminoDFS, path_flow, origen, destino
+    flujo, residualForward, residualBackward, caminoDFS, cuelloBotella, origen, destino
 ):
     v = destino
     while v != origen:
         u = caminoDFS[v][0]
 
         if caminoDFS[v][1] == ARISTA_FORWARD:
-            flujo[u][v] += path_flow
-            residualForward[u][v] -= path_flow
-            residualBackward[v][u] += path_flow
+            flujo[u][v] += cuelloBotella
+            residualForward[u][v] -= cuelloBotella
+            residualBackward[v][u] += cuelloBotella
         elif caminoDFS[v][1] == ARISTA_BACKWARD:
-            flujo[v][u] -= path_flow
-            residualForward[v][u] += path_flow
-            residualBackward[u][v] -= path_flow
+            flujo[v][u] -= cuelloBotella
+            residualForward[v][u] += cuelloBotella
+            residualBackward[u][v] -= cuelloBotella
 
         v = u
 
